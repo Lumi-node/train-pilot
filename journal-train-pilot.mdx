@@ -1,0 +1,24 @@
+---
+title: "TrainPilot: Hardware-Aware Agent Training Orchestrator"
+abstract: "Hardware-aware agent to orchestrate and optimize NN training workloads."
+authors:
+  - name: "Andrew Young"
+    affiliation: "Automate Capture Research"
+publishedDate: 2026-04-06
+tags:
+  - Hardware-Aware
+  - Agent Training
+  - Orchestrator
+  - Machine Learning
+status: published
+featured: false
+pdfUrl: "https://research.automate-capture.com/papers/RR-train-pilot-Young2026.pdf"
+---
+
+This week, the focus has been heavily on solidifying the core logic of the `hardware_orchestrator.py` module, which we've dubbed TrainPilot. The fundamental motivation behind this project stems from the growing inefficiency in large-scale ML experimentation. Currently, researchers often treat hardware as a static resource—if they have an ANE, they run the job on the ANE, regardless of whether the model is trivial or the dataset is minuscule. This leads to significant resource waste and unnecessarily long training times for simple tasks. TrainPilot aims to introduce a dynamic, intelligent layer between the training script and the underlying hardware. Essentially, we are building a "smart scheduler" for ML workloads, where the scheduler is powered by a ReasoningAgent capable of making real-time, informed decisions about resource allocation. The goal isn't just to *run* the training, but to *optimize* the execution path based on predicted efficiency.
+
+Technically, the heart of the system is the ReasoningAgent. This agent operates in a closed-loop feedback system. It first calls `profile_workload()`, which takes the model architecture (e.g., number of layers, parameter count) and dataset statistics to generate a quantitative complexity score. Next, it gathers real-time telemetry—current ANE utilization, CPU load, and historical performance logs—to establish a baseline operational context. The crucial step is `predict_performance()`. Here, the agent uses these inputs to estimate the expected wall-clock time for both ANE and CPU execution. Finally, `select_backend()` performs the decision: if the predicted ANE time is significantly better than the CPU time, and the current ANE load is below a predefined threshold, it invokes `ane_trainer`; otherwise, it gracefully falls back to the CPU path, potentially logging a reason for the downgrade. This probabilistic decision-making process is what elevates it beyond a simple threshold checker.
+
+What we've learned so far is the immense complexity of accurate performance prediction. While profiling the model architecture is straightforward, accurately modeling the *interaction* between model complexity, dataset I/O bottlenecks, and fluctuating hardware utilization is proving much harder than anticipated. Our initial predictions sometimes over-optimistically favor the ANE when the dataset loading pipeline becomes the primary bottleneck, effectively masking the ANE's computational advantages. This highlights a key limitation: the agent needs a more sophisticated understanding of I/O latency versus compute throughput. Future iterations must incorporate a more granular I/O profiling mechanism alongside the compute metrics.
+
+This work sits squarely at the intersection of AutoML, Resource Management, and Reinforcement Learning (though we are currently using a heuristic reasoning approach). It directly addresses the challenge of "hardware-aware optimization" in MLOps. By creating a system that learns *when* to use specialized hardware versus when the overhead of context switching or data transfer makes a simpler path faster, we are moving toward truly adaptive ML infrastructure. If successful, TrainPilot could significantly reduce cloud compute costs and accelerate research iteration cycles by ensuring the right tool is used for the right job, rather than defaulting to the most powerful one.

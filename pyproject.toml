@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "train-pilot"
+version = "0.1.0"
+description = "Hardware-aware agent to orchestrate and optimize NN training workloads."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Andrew Young", email = "research@automate-capture.com" },
+]
+keywords = ["MLOps", "Agent", "HardwareAware", "Training", "Orchestration"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    # no external dependencies
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "ruff",
+]
+docs = [
+    "mkdocs-material>=9.5",
+    "pymdown-extensions>=10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Lumi-node/train-pilot"
+Documentation = "https://lumi-node.github.io/train-pilot/"
+Repository = "https://github.com/Lumi-node/train-pilot"
+Issues = "https://github.com/Lumi-node/train-pilot/issues"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

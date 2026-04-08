@@ -25,19 +25,41 @@ The core functionality revolves around a ReasoningAgent that observes workload c
 ## Quick Start
 
 ```bash
-pip install train_pilot
+pip install train-pilot
 ```
 
+```bash
+# Run end-to-end orchestration
+python train_orchestrated.py --model small_cnn --dataset ./test_data_setup
+
+# Exit code 0 = success, 1 = failure
+```
+
+Or use the components directly in Python:
+
 ```python
-from train_pilot.train_orchestrated import TrainOrchestrator
+from hardware_orchestrator import HardwareOrchestrator
+from train_orchestrated import TrainingEnvironment
+import numpy as np
+import time
 
-# Initialize the orchestrator
-orchestrator = TrainOrchestrator()
+# Initialize orchestrator and environment
+agent = HardwareOrchestrator()
+X_train = np.random.rand(100, 28, 28)
+y_train = np.random.randint(0, 10, 100)
+environment = TrainingEnvironment(X_train, y_train, {"name": "small_cnn", "layers": 3, "has_conv": True, "has_rnn": False})
 
-# Run the workload profiling and selection process
-result = orchestrator.profile_workload(model_config, dataset_info)
+# Profile workload
+profile = agent.profile_workload({"name": "small_cnn", "layers": 3, "has_conv": True, "has_rnn": False}, 100)
 
-print(f"Optimal backend selected: {result.backend}")
+# Observe hardware and decide backend
+hw_state = {"ane_available": False, "cpu_utilization": 0.3, "timestamp": time.time()}
+agent.observe(hw_state, profile)
+backend = agent.think()
+
+# Execute training
+result = agent.act(backend, environment)
+print(f"Training result: {result['message']}")
 ```
 
 ## What Can You Do?
@@ -46,58 +68,122 @@ print(f"Optimal backend selected: {result.backend}")
 The agent can analyze a given model and dataset to extract crucial complexity metrics necessary for performance prediction.
 
 ```python
-from train_pilot.hardware_orchestrator import HardwareOrchestrator
+from hardware_orchestrator import HardwareOrchestrator
 
 orchestrator = HardwareOrchestrator()
-metrics = orchestrator.profile_workload(model_architecture, dataset_size)
-print(f"Model complexity score: {metrics.complexity}")
+profile = orchestrator.profile_workload(
+    {"name": "small_cnn", "layers": 3, "has_conv": True, "has_rnn": False},
+    dataset_size=10000
+)
+print(f"Model parameters: {profile['params']}, Depth: {profile['depth']}")
 ```
 
 ### Performance Prediction and Selection
-Based on observed metrics and historical data, TrainPilot estimates training time and selects the best hardware backend (ANE or CPU).
+Based on workload profile and hardware state, TrainPilot estimates training time and selects the best backend (ANE or CPU).
 
 ```python
-# Assuming metrics were gathered previously
-estimated_time = orchestrator.predict_performance(metrics)
-selected_backend = orchestrator.select_backend(metrics, current_utilization)
-print(f"Estimated time: {estimated_time}s, Chosen backend: {selected_backend}")
+# Assuming profile was gathered previously
+hw_state = {"ane_available": True, "cpu_utilization": 0.2, "timestamp": time.time()}
+ane_time = orchestrator.predict_performance(profile, "ane")
+cpu_time = orchestrator.predict_performance(profile, "cpu")
+backend, confidence = orchestrator.select_backend(profile, hw_state)
+print(f"ANE: {ane_time:.2f}s, CPU: {cpu_time:.2f}s => Selected: {backend} (confidence: {confidence})")
 ```
 
 ## Architecture
 
-TrainPilot operates around a central `ReasoningAgent` housed within `hardware_orchestrator.py`. This agent acts as the decision-maker, consuming inputs from workload analysis and hardware monitoring.
+TrainPilot operates around a central `HardwareOrchestrator` agent housed within `hardware_orchestrator.py`. This agent acts as the decision-maker, consuming inputs from workload analysis and real-time hardware monitoring.
 
-The flow is as follows:
-1. **Input:** Workload definition (Model, Data) $\rightarrow$ `profile_workload()`
-2. **Analysis:** Metrics are generated (Complexity, Size) $\rightarrow$ `predict_performance()`
-3. **Decision:** The agent compares predicted performance against current hardware state $\rightarrow$ `select_backend()`
-4. **Execution:** The decision triggers the appropriate training invocation (e.g., `ane_trainer` or CPU fallback) managed by `train_orchestrated.py`.
+The core loop follows an **Observe → Think → Act** pattern:
 
-```mermaid
-graph TD
-    A[Workload Input] --> B(HardwareOrchestrator);
-    B --> C{profile_workload()};
-    C --> D[Metrics];
-    D --> E{predict_performance()};
-    E --> F{select_backend()};
-    F --> G[TrainOrchestrator];
-    G --> H{ANE Trainer / CPU Fallback};
+1. **Input:** Model config + dataset size $\rightarrow$ `profile_workload()`
+2. **Profile:** Extract metrics (params, layers, conv/rnn architecture) → dict with performance characteristics
+3. **Observe:** Read hardware state (ANE available, CPU utilization) → `observe(hw_state, profile)`
+4. **Think:** Deterministic rule cascade selects optimal backend → `think()` returns "ane" or "cpu"
+5. **Predict:** Estimate execution time for each backend → `predict_performance(profile, backend)`
+6. **Act:** Execute training on selected backend via `TrainingEnvironment` → `act(backend, environment)`
+7. **Execution:** `TrainingEnvironment` routes to ANE trainer or PyTorch CPU backend
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│            HardwareOrchestrator (Decision Loop)             │
+├─────────────────────────────────────────────────────────────┤
+│  observe(hw_state, profile) ──→ think() ──→ act(backend)   │
+│                                                              │
+│  Rules: ANE unavailable? → CPU                             │
+│         RNN model? → CPU (0.95 confidence)                 │
+│         Conv + low CPU? → ANE (0.85 confidence)            │
+│         Default → CPU                                      │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                   ┌───────▼────────┐
+                   │ TrainingEnv    │
+                   ├────────────────┤
+                   │ execute_train  │
+                   │ (backend, cfg) │
+                   └───────┬────────┘
+                           │
+          ┌────────────────┴────────────────┐
+          │                                 │
+    ┌─────▼────┐                   ┌──────▼──────┐
+    │ ANE Path │                   │ CPU Path    │
+    │ (PyTorch)│                   │ (PyTorch)   │
+    └──────────┘                   └─────────────┘
 ```
 
 ## API Reference
 
 ### `HardwareOrchestrator`
-Manages the profiling and decision-making logic.
+Core decision-making agent for backend selection.
 
-- `profile_workload(model_architecture, dataset_size) -> WorkloadMetrics`: Extracts complexity metrics from the input configuration.
-- `predict_performance(metrics, utilization) -> float`: Estimates the required training time based on current conditions.
-- `select_backend(metrics, utilization) -> str`: Returns the optimal backend ('ANE' or 'CPU').
+**Constructor:**
+- `__init__()`: Initialize orchestrator with empty observation state.
 
-### `TrainOrchestrator`
-Handles the end-to-end workflow, integrating profiling with execution.
+**Methods:**
+- `profile_workload(model_config: dict, dataset_size: int) -> dict`: Extracts workload characteristics. Returns dict with keys: `params`, `layers`, `has_conv`, `has_rnn`, `depth`, `avg_layer_size`.
+  ```python
+  model_config = {"name": "small_cnn", "layers": 3, "has_conv": True, "has_rnn": False}
+  profile = orchestrator.profile_workload(model_config, dataset_size=10000)
+  # {'params': 50000, 'layers': 3, 'has_conv': True, 'has_rnn': False, 'depth': 5, 'avg_layer_size': 1000}
+  ```
 
-- `__init__()`: Initializes the underlying orchestrator components.
-- `run_training_pipeline(config) -> TrainingResult`: Executes the full cycle: profile $\rightarrow$ select $\rightarrow$ train.
+- `observe(hardware_state: dict, workload_profile: dict) -> None`: Store current observation (called before `think()`).
+  ```python
+  hw_state = {"ane_available": True, "cpu_utilization": 0.3, "timestamp": time.time()}
+  orchestrator.observe(hw_state, profile)
+  ```
+
+- `think() -> str`: Decide backend ("ane" or "cpu") based on last observation.
+  ```python
+  backend = orchestrator.think()  # Returns "ane" or "cpu"
+  ```
+
+- `predict_performance(profile: dict, backend: str) -> float`: Estimate training time (seconds).
+  ```python
+  ane_time = orchestrator.predict_performance(profile, "ane")
+  cpu_time = orchestrator.predict_performance(profile, "cpu")
+  ```
+
+- `select_backend(profile: dict, hardware_state: dict) -> tuple`: Returns `(backend: str, confidence: float)` using deterministic rules.
+  ```python
+  backend, confidence = orchestrator.select_backend(profile, hw_state)
+  # ("cpu", 0.8) or ("ane", 0.85)
+  ```
+
+- `act(action: str, environment) -> dict`: Execute training on selected backend. Returns dict with keys: `status`, `backend`, `execution_time`, `message`.
+  ```python
+  result = orchestrator.act("cpu", training_environment)
+  # {'status': 'success', 'backend': 'cpu', 'execution_time': 2.34, 'message': '...'}
+  ```
+
+### `TrainingEnvironment`
+Manages training execution on ANE or CPU backends.
+
+**Constructor:**
+- `__init__(X_train: np.ndarray, y_train: np.ndarray, model_config: dict)`: Initialize with training data and model configuration.
+
+**Methods:**
+- `execute_training(backend: str, workload_profile: dict) -> dict`: Execute training on specified backend. Returns dict with keys: `status`, `backend`, `execution_time`, `message`.
 
 ## Research Background
 
